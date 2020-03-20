@@ -20,7 +20,8 @@ int main()
 			std::cin.clear();
 			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 		} else {
-			size_t fsize = HTTPQueryFileSize(std::string(input_url));
+			std::string furl = std::string(input_url);
+			size_t fsize = HTTPQueryFileSize(furl);
 
 			if (fsize <= 0) {
 				printf("Target resource either doesn't exist or you don't have proper authentication\n");
@@ -30,17 +31,111 @@ int main()
 
 			const int chunksz = fsize / 10;
 
+			auto hostbuff = strExp(furl, '/');
+			auto tgtfile  = furl.substr(hostbuff[0].length(), furl.length());
+
+			csockdata skinfo;
+			skinfo.address		= hostbuff[0].c_str();
+			skinfo.port			= "80";
+			skinfo.dataprotocol = CSOCKET::CSOCKET_TCP;
+			skinfo.ipprotocol	= CSOCKET::CSOCKET_IPV4;
+			skinfo.socktype		= CSOCKET::CSOCKET_SIMPLE;
+
+
 			printf("File size: %i\nChunking size: %i\n", fsize, chunksz);
 
-			for (int i = 1; i < fsize; i += chunksz) 
+			char buff[1501];
+			ZeroMemory(buff, 1501);
+
+			for (int i = 0; i < fsize; i += chunksz)
 			{
-				if (i == 1) {
+				if (i == 0) {
 					printf("start: %i\nend: %i\n\n", i, (i+1) + chunksz);
+					auto req = mkpacket("GET", tgtfile, std::to_string(i) + "-" + std::to_string((i+1) + chunksz), "keep-alive");
+
+					CSOCKET* hst = new CSOCKET(&skinfo);
+					hst->Connect();
+					hst->Send(req.c_str(), req.length());
+
+					ZeroMemory(buff, 1501);
+
+					while (true) {
+						int got = hst->Recv(buff, 1500);
+						if (got == CSOCKET::CSOCKET_FATAL_ERROR || strcmp(buff, "") == 0) {
+							break;
+						}
+
+						std::streamsize st = i;
+
+						std::fstream file(tgtfile.c_str(), std::fstream::in | std::fstream::out);
+						file.seekp(st);
+
+						file.write(buff, chunksz);
+						printf("\n__1buff: '%s'\n", buff);
+						
+						break;
+					}
+					
+					delete hst;
 				} else {
 					if (((i + 1) + chunksz) > fsize) {
 						printf("start: %i\nend: %i\n\n", i + 2, fsize);
+
+						auto req = mkpacket("GET", tgtfile, std::to_string(i+2) + "-" + std::to_string(fsize), "close");
+
+						CSOCKET* hst = new CSOCKET(&skinfo);
+						hst->Connect();
+						hst->Send(req.c_str(), req.length());
+
+						ZeroMemory(buff, 1501);
+
+						while (true) {
+							int got = hst->Recv(buff, 1500);
+							if (got == CSOCKET::CSOCKET_FATAL_ERROR || strcmp(buff, "") == 0) {
+								break;
+							}
+
+							std::streamsize st = i+2;
+
+							std::fstream file(tgtfile.c_str(), std::fstream::in | std::fstream::out);
+							file.seekp(st);
+
+							file.write(buff, chunksz);
+							printf("\n__2buff: '%s'\n", buff);
+
+							break;
+						}
+
+						delete hst;
 					} else {
-						printf("start: %i\nend: %i\n\n", i + 2, (i + 1) + chunksz);
+						printf("start: %i\nend: %i\n\n", i + 2, (i + 2) + chunksz);
+
+						auto req = mkpacket("GET", tgtfile, std::to_string(i+2) + "-" + std::to_string((i + 2) + chunksz), "keep-alive");
+
+						CSOCKET* hst = new CSOCKET(&skinfo);
+						hst->Connect();
+						hst->Send(req.c_str(), req.length());
+
+						ZeroMemory(buff, 1501);
+
+						while (true) {
+							int got = hst->Recv(buff, 1500);
+							if (got == CSOCKET::CSOCKET_FATAL_ERROR || strcmp(buff, "") == 0) {
+								break;
+							}
+
+							std::streamsize st = i+2;
+
+							std::fstream file(tgtfile.c_str(), std::fstream::in | std::fstream::out);
+							file.seekp(st);
+
+							file.write(buff, chunksz);
+							printf("\n__3buff: '%s'\n", buff);
+
+							break;
+						}
+
+						delete hst;
 					}
 				}
 			}
@@ -48,6 +143,15 @@ int main()
 	}
 
 	return NULL;
+}
+
+std::string mkpacket(std::string rqmtd, std::string argv, std::string range, std::string connection)
+{
+	return rqmtd + " " + argv + " HTTP/1.1\r\n"
+		+ "Range: " + range + "\r\n"
+		+ "User-Agent: getx HTTP Downloader\r\n"
+		+ "Accept: */*\r\n"
+		+ "Connection: " + connection + "\r\n\r\n";
 }
 
 size_t HTTPQueryFileSize(std::string url)
